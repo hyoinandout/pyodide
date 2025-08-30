@@ -237,10 +237,12 @@ def test_nan_conversions(selenium):
 @given(n=st.integers())
 @std_hypothesis_settings
 def test_bigint_conversions(selenium_module_scope, n):
-    with selenium_context_manager(selenium_module_scope) as selenium:
-        h = hex(n)
-        selenium.run_js(f"self.h = {h!r};")
-        selenium.run_js(
+    @run_in_pyodide
+    def main(selenium, h_str):
+        from pyodide.code import run_js
+
+        run_js(f"self.h = {h_str!r};")
+        run_js(
             """
             let negative = false;
             let h2 = h;
@@ -252,11 +254,16 @@ def test_bigint_conversions(selenium_module_scope, n):
             if(negative){
                 self.n = -n;
             }
-            pyodide.runPython(`
-                from js import n, h
-                n2 = int(h, 16)
-                assert n == n2
-            `);
+            """
+        )
+
+        from js import h, n  # type: ignore[attr-defined]
+
+        n2 = int(h, 16)
+        assert n == n2
+
+        run_js(
+            """
             let n2 = pyodide.globals.get("n2");
             let n3 = Number(n2);
             if(Number.isSafeInteger(n3)){
@@ -268,6 +275,10 @@ def test_bigint_conversions(selenium_module_scope, n):
             }
             """
         )
+
+    with selenium_context_manager(selenium_module_scope) as selenium:
+        h = hex(n)
+        main(selenium, h)
 
 
 @given(
@@ -542,14 +553,25 @@ def test_python2js5(selenium):
         )
 
 
+@run_in_pyodide
 def test_python2js_track_proxies(selenium):
-    selenium.run_js(
+    from pyodide.code import run_js
+
+    class T:
+        pass
+
+    import __main__
+
+    __main__.complex_list = [
+        [T()],
+        [T()],
+        [[[T()], [T()]], [T(), [], [[T()]], T()], T(), T()],
+        T(),
+    ]
+
+    run_js(
         """
-        let x = pyodide.runPython(`
-            class T:
-                pass
-            [[T()],[T()], [[[T()],[T()]],[T(), [], [[T()]], T()], T(), T()], T()]
-        `);
+        let x = pyodide.globals.get("complex_list");
         let proxies = [];
         let result = x.toJs({ pyproxies : proxies });
         assert(() => proxies.length === 10);
@@ -614,8 +636,11 @@ def test_wrong_way_track_proxies(selenium):
         to_js(x, create_pyproxies=False)
 
 
+@run_in_pyodide
 def test_wrong_way_conversions1(selenium):
-    selenium.run_js(
+    from pyodide.code import run_js
+
+    run_js(
         """
         assert(() => pyodide.toPy(5) === 5);
         assert(() => pyodide.toPy(5n) === 5n);
@@ -628,11 +653,16 @@ def test_wrong_way_conversions1(selenium):
         self.b1 = pyodide.toPy(a1);
         self.a2 = { a : 1, b : 2, c : 3};
         self.b2 = pyodide.toPy(a2);
-        pyodide.runPython(`
-            from js import a1, b1, a2, b2
-            assert a1.to_py() == b1
-            assert a2.to_py() == b2
-        `);
+        """
+    )
+
+    from js import a1, a2, b1, b2  # type: ignore[attr-defined]
+
+    assert a1.to_py() == b1
+    assert a2.to_py() == b2
+
+    run_js(
+        """
         self.b1.destroy();
         self.b2.destroy();
         """
@@ -1002,9 +1032,18 @@ def test_dict_subclass_to_js(selenium):
     assert eval(j(D2({"a": "b"}))) == d
 
 
+@run_in_pyodide
 def test_list_js2py2js(selenium):
-    selenium.run_js("self.x = [1,2,3];")
-    assert_js_to_py_to_js(selenium, "x")
+    from pyodide.code import run_js
+
+    run_js("self.x = [1,2,3];")
+    run_js("self.obj = x;")
+    assert run_js(
+        """
+        let pyobj = pyodide.globals.get("obj");
+        return pyobj === obj;
+        """
+    )
 
 
 def test_dict_js2py2js(selenium):
@@ -1509,17 +1548,22 @@ def test_to_py_default_converter2(selenium):
     assert r2[0] is r2
 
 
+@run_in_pyodide
 def test_to_js_default_converter(selenium):
-    selenium.run_js(
+    from pyodide.code import run_js
+
+    class Pair:
+        def __init__(self, first, second):
+            self.first = first
+            self.second = second
+
+    import __main__
+
+    __main__.p = Pair(1, 2)
+
+    run_js(
         """
-        p = pyodide.runPython(`
-        class Pair:
-            def __init__(self, first, second):
-                self.first = first
-                self.second = second
-        p = Pair(1,2)
-        p
-        `);
+        let p = pyodide.globals.get("p");
         let res = p.toJs({ default_converter(x, convert, cacheConversion){
             let result = [];
             cacheConversion(x, result);

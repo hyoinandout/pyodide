@@ -151,29 +151,25 @@ def test_syncify_null(selenium):
 
 
 @requires_jspi
+@run_in_pyodide(packages=["pytest"])
 def test_syncify_no_suspender(selenium):
-    selenium.run_js(
-        """
-        await pyodide.loadPackage("pytest");
-        pyodide.runPython(`
-            from pyodide.code import run_js
-            from pyodide.ffi import run_sync
-            import pytest
+    import pytest
 
-            test = run_js(
-                '''
-                (async function test() {
-                    await sleep(1000);
-                    return 7;
-                })
-                '''
-            )
-            with pytest.raises(RuntimeError, match="Cannot stack switch"):
-                run_sync(test())
-            del test
-        `);
+    from pyodide.code import run_js
+    from pyodide.ffi import run_sync
+
+    test = run_js(
+        """
+        (async function test() {
+            await sleep(1000);
+            return 7;
+        })
         """
     )
+
+    with pytest.raises(RuntimeError, match="Cannot stack switch"):
+        run_sync(test())
+    del test
 
 
 @pytest.mark.requires_dynamic_linking

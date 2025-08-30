@@ -262,21 +262,21 @@ def test_jsproxy_implicit_iter(selenium):
     assert selenium.run("list(Object.values(ITER))") == [1, 2, 3]
 
 
+@run_in_pyodide
 def test_jsproxy_call1(selenium):
-    assert selenium.run_js(
+    from pyodide.code import run_js
+
+    run_js(
         """
-            self.f = function(){ return arguments.length; };
-            let pyresult = pyodide.runPython(
-                `
-                from js import f
-                [f(*range(n)) for n in range(10)]
-                `
-            );
-            let result = pyresult.toJs();
-            pyresult.destroy();
-            return result;
-            """
-    ) == list(range(10))
+        self.f = function(){ return arguments.length; };
+        """
+    )
+
+    from js import f  # type: ignore[attr-defined]
+
+    result = [f(*range(n)) for n in range(10)]
+
+    assert result == list(range(10))
 
 
 @run_in_pyodide
@@ -287,20 +287,23 @@ def test_jsproxy_call2(selenium):
     assert [f(*range(n)) for n in range(10)] == list(range(10))
 
 
+@run_in_pyodide
 def test_jsproxy_call_kwargs(selenium):
-    assert selenium.run_js(
+    from pyodide.code import run_js
+
+    run_js(
         """
-            self.kwarg_function = ({ a = 1, b = 1 }) => {
-                return [a, b];
-            };
-            return pyodide.runPython(
-                `
-                from js import kwarg_function
-                kwarg_function(b = 2, a = 10)
-                `
-            );
-            """
-    ) == [10, 2]
+        self.kwarg_function = ({ a = 1, b = 1 }) => {
+            return [a, b];
+        };
+        """
+    )
+
+    from js import kwarg_function  # type: ignore[attr-defined]
+
+    result = kwarg_function(b=2, a=10)
+
+    assert result.to_py() == [10, 2]
 
 
 @pytest.mark.xfail
@@ -1183,20 +1186,18 @@ def test_buffer_into_file2(selenium):
         assert pyodide_js.FS.streams[f.fileno()].node.contents.buffer == a.buffer
 
 
+@run_in_pyodide
 def test_buffer_assign_back(selenium):
-    result = selenium.run_js(
-        """
-        self.jsarray = new Uint8Array([1, 2, 3, 4, 5, 6]);
-        pyodide.runPython(`
-            from js import jsarray
-            array = jsarray.to_py()
-            array[1::2] = bytes([20, 77, 9])
-            jsarray.assign(array)
-        `);
-        return Array.from(jsarray)
-        """
-    )
-    assert result == [1, 20, 3, 77, 5, 9]
+    from pyodide.code import run_js
+
+    jsarray = run_js("new Uint8Array([1, 2, 3, 4, 5, 6])")
+
+    array = jsarray.to_py()
+    array[1::2] = bytes([20, 77, 9])
+    jsarray.assign(array)
+
+    result = run_js("(jsarray) => Array.from(jsarray)")(jsarray)
+    assert result.to_py() == [1, 20, 3, 77, 5, 9]
 
 
 @run_in_pyodide
@@ -1264,19 +1265,18 @@ def test_duck_buffer_method_presence(selenium):
     assert not set(dir(other)).intersection(buffer_methods)
 
 
+@run_in_pyodide
 def test_memory_leaks(selenium):
     # refcounts are tested automatically in conftest by default
-    selenium.run_js(
-        """
-        self.a = [1,2,3];
-        pyodide.runPython(`
-            from js import a
-            repr(a)
-            [*a]
-            None
-        `);
-        """
-    )
+    from pyodide.code import run_js
+
+    run_js("self.a = [1,2,3];")
+
+    from js import a  # type: ignore[attr-defined]
+
+    _ = repr(a)
+    _ = [*a]
+    _ = None
 
 
 @run_in_pyodide
